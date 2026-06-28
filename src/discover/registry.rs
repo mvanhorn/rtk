@@ -36,6 +36,11 @@ pub fn category_avg_tokens(category: &str, subcmd: &str) -> usize {
         "Network" => 150,
         "GitHub" => 200,
         "PackageManager" => 150,
+        "PHP" => match subcmd {
+            "route:list" | "migrate:status" => 400,
+            "about" | "db:show" => 250,
+            _ => 150,
+        },
         _ => 150,
     }
 }
@@ -972,6 +977,19 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_classify_php_artisan_route_list() {
+        assert_eq!(
+            classify_command("php artisan route:list"),
+            Classification::Supported {
+                rtk_equivalent: "rtk artisan",
+                category: "PHP",
+                estimated_savings_pct: 90.0,
+                status: RtkStatus::Existing,
+            }
+        );
+    }
+
     // --- rewrite_command tests ---
 
     #[test]
@@ -1038,6 +1056,19 @@ mod tests {
             rewrite_command("cargo test", &[]),
             Some("rtk cargo test".into())
         );
+    }
+
+    #[test]
+    fn test_rewrite_php_artisan() {
+        assert_eq!(
+            rewrite_command("php artisan route:list --path=api", &[]),
+            Some("rtk artisan route:list --path=api".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_php_non_artisan_ignored() {
+        assert_eq!(rewrite_command("php -r 'echo 1;'", &[]), None);
     }
 
     #[test]

@@ -49,6 +49,8 @@ pub const PATTERNS: &[&str] = &[
     r"^(?:bundle\s+exec\s+)?(?:bin/)?(?:rake|rails)\s+test",
     r"^(?:bundle\s+exec\s+)?rspec(?:\s|$)",
     r"^(?:bundle\s+exec\s+)?rubocop(?:\s|$)",
+    // PHP / Laravel tooling
+    r"^php\s+artisan(?:\s+([A-Za-z0-9:_-]+))?(?:\s|$)",
     // AWS CLI
     r"^aws\s+",
     // PostgreSQL
@@ -374,6 +376,20 @@ pub const RULES: &[RtkRule] = &[
         category: "Build",
         savings_pct: 65.0,
         subcmd_savings: &[],
+        subcmd_status: &[],
+    },
+    // PHP / Laravel tooling
+    RtkRule {
+        rtk_cmd: "rtk artisan",
+        rewrite_prefixes: &["php artisan"],
+        category: "PHP",
+        savings_pct: 80.0,
+        subcmd_savings: &[
+            ("route:list", 90.0),
+            ("migrate:status", 85.0),
+            ("about", 75.0),
+            ("db:show", 80.0),
+        ],
         subcmd_status: &[],
     },
     // AWS CLI

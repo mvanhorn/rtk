@@ -3,6 +3,7 @@ mod binlog;
 mod cargo_cmd;
 mod cc_economics;
 mod ccusage;
+mod cmds;
 mod config;
 mod container;
 mod curl_cmd;
@@ -534,6 +535,13 @@ enum Commands {
     /// npm run with filtered output (strip boilerplate)
     Npm {
         /// npm run arguments (script name + options)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+
+    /// Laravel php artisan commands with compact output
+    Artisan {
+        /// Artisan arguments (subcommand + options)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -1896,6 +1904,10 @@ fn main() -> Result<()> {
             npm_cmd::run(&args, cli.verbose, cli.skip_env)?;
         }
 
+        Commands::Artisan { args } => {
+            cmds::php::artisan_cmd::run(&args, cli.verbose, cli.skip_env)?;
+        }
+
         Commands::Curl { args } => {
             curl_cmd::run(&args, cli.verbose)?;
         }
@@ -2291,6 +2303,7 @@ fn is_operational_command(cmd: &Commands) -> bool {
             | Commands::Playwright { .. }
             | Commands::Cargo { .. }
             | Commands::Npm { .. }
+            | Commands::Artisan { .. }
             | Commands::Npx { .. }
             | Commands::Curl { .. }
             | Commands::Ruff { .. }
@@ -2347,6 +2360,34 @@ mod tests {
                 );
             }
             _ => panic!("Expected Git Commit command"),
+        }
+    }
+
+    #[test]
+    fn test_artisan_args_allow_flags_and_values() {
+        let cli = Cli::try_parse_from([
+            "rtk",
+            "artisan",
+            "route:list",
+            "--path=api",
+            "--columns=method,uri,name",
+            "quoted value",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Artisan { args } => {
+                assert_eq!(
+                    args,
+                    vec![
+                        "route:list",
+                        "--path=api",
+                        "--columns=method,uri,name",
+                        "quoted value"
+                    ]
+                );
+            }
+            _ => panic!("Expected Artisan command"),
         }
     }
 
