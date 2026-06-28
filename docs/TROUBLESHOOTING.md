@@ -198,6 +198,14 @@ OpenCode must be restarted to load the plugin.
 rtk init --show  # Should show "OpenCode: plugin installed"
 ```
 
+**6. OpenCode Desktop path check (macOS GUI launches):**
+OpenCode Desktop runs plugins with Node.js and may not inherit your shell `PATH`.
+The plugin looks for `rtk` via `RTK_BIN`, `PATH`, `~/.local/bin/rtk`,
+`~/.cargo/bin/rtk`, `/opt/homebrew/bin/rtk`, and `/usr/local/bin/rtk`.
+If `rtk --version` works in your terminal but Desktop still runs raw commands,
+install or symlink the correct `rtk` binary into one of those locations, or set
+`RTK_BIN` to the absolute path before launching OpenCode Desktop.
+
 ---
 
 ## Problem: RTK commands fail on Windows ("program not found" or "No such file")

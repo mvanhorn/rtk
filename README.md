@@ -318,6 +318,8 @@ OpenCode supports plugins that can intercept tool execution. RTK provides a glob
 
 > **Note**: This plugin uses OpenCode's `tool.execute.before` hook. Known limitation: plugin hooks do not intercept subagent tool calls ([upstream issue](https://github.com/sst/opencode/issues/5894)). See [OpenCode plugin docs](https://open-code.ai/en/docs/plugins) for API details.
 
+**Desktop support:** The plugin works in both OpenCode CLI (Bun runtime) and OpenCode Desktop (Node runtime). For Desktop on macOS, GUI apps may not inherit your shell `PATH`, so the plugin resolves `rtk` from `RTK_BIN`, `PATH`, `~/.local/bin/rtk`, `~/.cargo/bin/rtk`, and common Homebrew locations.
+
 **Install OpenCode plugin:**
 ```bash
 rtk init -g --opencode
