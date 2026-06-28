@@ -137,6 +137,38 @@ RTK backs up existing settings.json before changes. Restore if needed:
 cp ~/.claude/settings.json.bak ~/.claude/settings.json
 ```
 
+### Native Windows (without WSL)
+
+On native Windows, the Unix `.sh` hook script cannot run directly. If `rtk init -g`
+falls back to CLAUDE.md mode but you want full hook mode coverage in Claude Code,
+add the Rust hook processor directly to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rtk hook claude"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+If your `settings.json` already has a `hooks.PreToolUse` array, append the object
+with `"matcher": "Bash"` to that array instead of replacing existing hooks. Make
+sure `rtk` is on the PATH used by the PowerShell session that launches Claude Code,
+then restart Claude Code and test with `git status`.
+
+This native Windows path has been verified with PowerShell 7.6.3. WSL users should
+keep using the standard `rtk init -g` hook flow inside WSL.
+
 ### Alternative: Local Project Setup
 
 **Best for: Single project without hook**

@@ -87,6 +87,9 @@ Download from [releases](https://github.com/rtk-ai/rtk/releases):
 - Linux: `rtk-x86_64-unknown-linux-musl.tar.gz` / `rtk-aarch64-unknown-linux-gnu.tar.gz`
 - Windows: `rtk-x86_64-pc-windows-msvc.zip`
 
+Native Windows users can enable hook mode without WSL by adding the manual
+`settings.json` entry in [INSTALL.md](INSTALL.md#native-windows-without-wsl).
+
 ### Verify Installation
 
 ```bash

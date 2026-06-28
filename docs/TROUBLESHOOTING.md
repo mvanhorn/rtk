@@ -167,6 +167,23 @@ Then add to `~/.claude/settings.json` (replace `~` with full path):
 
 ---
 
+## Problem: Native Windows uses CLAUDE.md mode but you want hook mode
+
+### Symptom
+On native Windows, `rtk init -g` cannot run the Unix `.sh` hook script and Claude
+Code stays in CLAUDE.md mode, so Bash tool calls are not transparently rewritten.
+
+### Solution
+Use the native Windows `settings.json` hook entry instead of the `.sh` wrapper.
+See [Native Windows (without WSL)](../INSTALL.md#native-windows-without-wsl) for
+the copy-pasteable `PreToolUse` snippet using `"command": "rtk hook claude"`.
+
+Append the RTK entry to any existing `hooks.PreToolUse` array, restart Claude
+Code, and test with `git status`. This applies to native PowerShell sessions; WSL
+users should keep using the standard installer flow inside WSL.
+
+---
+
 ## Problem: RTK not working in OpenCode
 
 ### Symptom
