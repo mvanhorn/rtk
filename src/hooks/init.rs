@@ -412,6 +412,9 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         )
     })?;
 
+    fs::create_dir_all(parent)
+        .with_context(|| format!("Failed to create parent directory {}", parent.display()))?;
+
     // Create temp file in same directory (ensures same filesystem for atomic rename)
     let mut temp_file = NamedTempFile::new_in(parent)
         .with_context(|| format!("Failed to create temp file in {}", parent.display()))?;
@@ -6250,12 +6253,66 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let file_path = temp.path().join("test.json");
 
-        let content = r#"{"key": "value"}"#;
-        atomic_write(&file_path, content).unwrap();
+        atomic_write(&file_path, r#"{"key": "value"}"#).expect("write initial content");
+        atomic_write(&file_path, r#"{"key": "updated"}"#).expect("overwrite existing file");
 
         assert!(file_path.exists());
         let written = fs::read_to_string(&file_path).unwrap();
-        assert_eq!(written, content);
+        assert_eq!(written, r#"{"key": "updated"}"#);
+    }
+
+    #[test]
+    fn test_atomic_write_creates_missing_parent_directory() {
+        let temp = TempDir::new().expect("create temp directory");
+        let file_path = temp.path().join(".claude").join("RTK.md");
+
+        atomic_write(&file_path, RTK_SLIM).expect("write file in missing parent directory");
+
+        assert!(file_path.parent().expect("file has parent").is_dir());
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("read atomically written file"),
+            RTK_SLIM
+        );
+    }
+
+    #[test]
+    fn test_write_if_changed_is_noop_when_content_matches() {
+        let temp = TempDir::new().expect("create temp directory");
+        let file_path = temp.path().join("RTK.md");
+        fs::write(&file_path, RTK_SLIM).expect("seed RTK.md");
+
+        let changed = write_if_changed(&file_path, RTK_SLIM, RTK_MD, InitContext::default())
+            .expect("check unchanged file");
+
+        assert!(!changed);
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("read unchanged file"),
+            RTK_SLIM
+        );
+    }
+
+    #[test]
+    fn test_atomic_write_rejects_path_without_parent() {
+        let error = atomic_write(Path::new(std::path::MAIN_SEPARATOR_STR), "content")
+            .expect_err("root path must not have a parent directory");
+
+        assert!(error.to_string().contains("path has no parent directory"));
+    }
+
+    #[test]
+    fn test_atomic_write_reports_parent_creation_error() {
+        let temp = TempDir::new().expect("create temp directory");
+        let blocked_parent = temp.path().join("not-a-directory");
+        fs::write(&blocked_parent, "content").expect("create blocking file");
+        let file_path = blocked_parent.join("RTK.md");
+
+        let error =
+            atomic_write(&file_path, RTK_SLIM).expect_err("writing below a regular file must fail");
+
+        assert!(error.to_string().contains(&format!(
+            "Failed to create parent directory {}",
+            blocked_parent.display()
+        )));
     }
 
     #[cfg(unix)]
