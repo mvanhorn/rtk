@@ -5,7 +5,7 @@ use crate::core::tracking;
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Component, Path};
 
 /// Match a filename against a glob pattern (supports `*` and `?`).
 fn glob_match(pattern: &str, name: &str) -> bool {
@@ -177,6 +177,35 @@ fn parse_rtk_find_args(args: &[String]) -> Result<FindArgs> {
     Ok(parsed)
 }
 
+/// Reject search paths that resolve to the filesystem root.
+fn validate_search_path(path: &Path) -> Result<()> {
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        let cwd =
+            std::env::current_dir().context("failed to resolve current working directory")?;
+        cwd.join(path)
+    };
+    let resolved = resolved.canonicalize().unwrap_or(resolved);
+
+    let depth = resolved
+        .components()
+        .fold(0usize, |depth, component| match component {
+            Component::Normal(_) => depth + 1,
+            Component::ParentDir => depth.saturating_sub(1),
+            _ => depth,
+        });
+
+    if resolved.has_root() && depth == 0 {
+        anyhow::bail!(
+            "refusing to search filesystem root '{}'; choose a narrower path",
+            path.display()
+        );
+    }
+
+    Ok(())
+}
+
 /// Entry point from main.rs — parses raw args then delegates to run().
 pub fn run_from_args(args: &[String], verbose: u8) -> Result<()> {
     let parsed = parse_find_args(args)?;
@@ -200,6 +229,8 @@ pub fn run(
     case_insensitive: bool,
     verbose: u8,
 ) -> Result<()> {
+    validate_search_path(Path::new(path))?;
+
     let timer = tracking::TimedExecution::start();
 
     // Treat "." as match-all
@@ -391,6 +422,10 @@ mod tests {
     /// Convert string slices to Vec<String> for test convenience.
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn run_at(path: &Path) -> Result<()> {
+        run("*", &path.to_string_lossy(), 5, Some(0), "f", false, 0)
     }
 
     // --- glob_match unit tests ---
@@ -616,5 +651,76 @@ mod tests {
         assert!(result.is_ok());
         // We can't easily capture stdout in unit tests, but at least
         // verify it runs without error. The smoke tests verify content.
+    }
+
+    // --- filesystem root guard ---
+
+    #[test]
+    fn find_allows_bounded_search_roots() {
+        let temp_dir = tempfile::tempdir().expect("create temporary directory");
+
+        assert!(run_at(Path::new("src")).is_ok());
+        assert!(run_at(temp_dir.path()).is_ok());
+    }
+
+    #[test]
+    fn find_rejects_filesystem_root() {
+        let cwd = std::env::current_dir().expect("resolve current directory");
+        let root = cwd.ancestors().last().expect("current directory has a root");
+
+        let error = run_at(root).expect_err("filesystem root must be rejected");
+
+        assert!(error.to_string().contains("filesystem root"));
+        assert!(error.to_string().contains("narrower path"));
+    }
+
+    #[test]
+    fn find_rejects_absolute_path_that_normalizes_to_root() {
+        let cwd = std::env::current_dir().expect("resolve current directory");
+        let root = cwd.ancestors().last().expect("current directory has a root");
+        let bypass = root.join("rtk-find-root-guard").join("..");
+
+        let error =
+            run_at(&bypass).expect_err("path that normalizes to filesystem root must be rejected");
+
+        assert!(error.to_string().contains("filesystem root"));
+    }
+
+    #[test]
+    fn find_rejects_relative_path_that_normalizes_to_root() {
+        let cwd = std::env::current_dir().expect("resolve current directory");
+        let mut relative_root = std::path::PathBuf::new();
+        for _ in cwd
+            .components()
+            .filter(|component| matches!(component, Component::Normal(_)))
+        {
+            relative_root.push("..");
+        }
+
+        let error = run_at(&relative_root)
+            .expect_err("relative path that normalizes to filesystem root must be rejected");
+
+        assert!(error.to_string().contains("filesystem root"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn find_rejects_symlink_to_filesystem_root() {
+        let temp_dir = tempfile::tempdir().expect("create temporary directory");
+        let cwd = std::env::current_dir().expect("resolve current directory");
+        let root = cwd.ancestors().last().expect("current directory has a root");
+        let root_link = temp_dir.path().join("root-link");
+        std::os::unix::fs::symlink(root, &root_link).expect("create symlink to filesystem root");
+
+        let error = run_at(&root_link).expect_err("symlink to filesystem root must be rejected");
+
+        assert!(error.to_string().contains("filesystem root"));
+    }
+
+    #[test]
+    fn find_allows_missing_relative_path() {
+        let missing = format!("rtk-find-missing-{}", std::process::id());
+
+        assert!(run_at(Path::new(&missing)).is_ok());
     }
 }
