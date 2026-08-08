@@ -71,7 +71,7 @@ const UNSUPPORTED_FIND_FLAGS: &[&str] = &[
     "-regex", "-iregex",
 ];
 
-fn has_unsupported_find_flags(args: &[String]) -> bool {
+pub(crate) fn has_unsupported_find_flags(args: &[String]) -> bool {
     args.iter()
         .any(|a| UNSUPPORTED_FIND_FLAGS.contains(&a.as_str()))
 }

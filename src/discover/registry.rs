@@ -1209,6 +1209,13 @@ fn search_uses_pattern_file(cmd: &str) -> bool {
         })
 }
 
+fn find_uses_unsupported_flags(cmd: &str) -> bool {
+    let normalized = strip_absolute_path(cmd);
+    let args = shell_split(&normalized);
+    args.first().is_some_and(|arg| arg == "find")
+        && crate::cmds::system::find_cmd::has_unsupported_find_flags(&args[1..])
+}
+
 fn pipeline_final_command_is_safe(rtk_cmd: &str, cmd: &str) -> bool {
     !matches!(rtk_cmd, "rtk grep" | "rtk rg") || !search_uses_pattern_file(cmd)
 }
@@ -1359,6 +1366,10 @@ fn rewrite_segment_inner(
     // Already RTK — pass through unchanged
     if cmd_part.starts_with("rtk ") || cmd_part == "rtk" {
         return Some(trimmed.to_string());
+    }
+
+    if find_uses_unsupported_flags(cmd_part) {
+        return None;
     }
 
     if context == RewriteContext::Normal
@@ -4617,6 +4628,51 @@ mod tests {
         assert_eq!(
             rewrite_command_no_prefixes("find . -name '*.rs' -type f", &[]),
             Some("rtk find . -name '*.rs' -type f".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_find_with_unsupported_not_stays_native() {
+        assert_eq!(
+            rewrite_command_no_prefixes("find . -name '*.rs' -not -name '*_test.rs'", &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn test_rewrite_find_with_unsupported_exec_stays_native_through_prefixes() {
+        assert_eq!(
+            rewrite_command_no_prefixes(r"FOO=1 find . -name '*.tmp' -exec rm {} \;", &[]),
+            None
+        );
+
+        let prefixes = vec!["shadowenv exec --".to_string()];
+        assert_eq!(
+            super::rewrite_command(
+                r"shadowenv exec -- find . -name '*.tmp' -exec rm {} \;",
+                &[],
+                &prefixes
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn test_rewrite_find_with_supported_native_flags() {
+        assert_eq!(
+            rewrite_command_no_prefixes("find src -iname '*.RS' -type f -maxdepth 3", &[]),
+            Some("rtk find src -iname '*.RS' -type f -maxdepth 3".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_compound_preserves_unsupported_find_segment() {
+        assert_eq!(
+            rewrite_command_no_prefixes(
+                "find . -name '*.rs' -not -name '*_test.rs' && git status",
+                &[]
+            ),
+            Some("find . -name '*.rs' -not -name '*_test.rs' && rtk git status".into())
         );
     }
 
