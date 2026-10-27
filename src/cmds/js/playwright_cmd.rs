@@ -236,6 +236,30 @@ fn extract_failures_regex(output: &str) -> Vec<TestFailure> {
     failures
 }
 
+/// True only when the first argument is `test` (`playwright test ...`).
+fn is_playwright_test(args: &[String]) -> bool {
+    args.first().is_some_and(|arg| arg == "test")
+}
+
+/// Stdout and stderr as a non-test command wrote them.
+///
+/// Empty stderr is stdout alone, empty stdout is stderr alone, and both
+/// non-empty are stdout then stderr with one newline between them when stdout
+/// does not already end in one. No blank stderr section is added.
+fn join_nontest_output(stdout: &str, stderr: &str) -> String {
+    if stderr.is_empty() {
+        return stdout.to_string();
+    }
+    if stdout.is_empty() {
+        return stderr.to_string();
+    }
+    if stdout.ends_with('\n') {
+        format!("{stdout}{stderr}")
+    } else {
+        format!("{stdout}\n{stderr}")
+    }
+}
+
 pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     let timer = tracking::TimedExecution::start();
 
@@ -261,7 +285,7 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     };
 
     // Only inject --reporter=json for `playwright test` runs
-    let is_test = args.first().map(|a| a == "test").unwrap_or(false);
+    let is_test = is_playwright_test(args);
     if is_test {
         cmd.arg("test");
         cmd.arg("--reporter=json");
@@ -284,29 +308,35 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     let result = exec_capture(&mut cmd)
         .context("Failed to run playwright (try: npm install -g playwright)")?;
 
-    let raw = format!("{}\n{}", result.stdout, result.stderr);
+    // Non-test commands (version, install, codegen, ...) are not test reports.
+    // Parsing them always misses and prints a banner agents treat as failure.
+    let (raw, filtered) = if is_test {
+        let raw = format!("{}\n{}", result.stdout, result.stderr);
+        let parse_result = PlaywrightParser::parse(&result.stdout);
+        let mode = FormatMode::from_verbosity(verbose);
 
-    // Parse output using PlaywrightParser
-    let parse_result = PlaywrightParser::parse(&result.stdout);
-    let mode = FormatMode::from_verbosity(verbose);
-
-    let filtered = match parse_result {
-        ParseResult::Full(data) => {
-            if verbose > 0 {
-                eprintln!("playwright test (Tier 1: Full JSON parse)");
+        let filtered = match parse_result {
+            ParseResult::Full(data) => {
+                if verbose > 0 {
+                    eprintln!("playwright test (Tier 1: Full JSON parse)");
+                }
+                data.format(mode)
             }
-            data.format(mode)
-        }
-        ParseResult::Degraded(data, warnings) => {
-            if verbose > 0 {
-                emit_degradation_warning("playwright", &warnings.join(", "));
+            ParseResult::Degraded(data, warnings) => {
+                if verbose > 0 {
+                    emit_degradation_warning("playwright", &warnings.join(", "));
+                }
+                data.format(mode)
             }
-            data.format(mode)
-        }
-        ParseResult::Passthrough(raw) => {
-            emit_passthrough_warning("playwright", "All parsing tiers failed");
-            raw
-        }
+            ParseResult::Passthrough(raw) => {
+                emit_passthrough_warning("playwright", "All parsing tiers failed");
+                raw
+            }
+        };
+        (raw, filtered)
+    } else {
+        let joined = join_nontest_output(&result.stdout, &result.stderr);
+        (joined.clone(), joined)
     };
 
     let hint = crate::core::tee::tee_and_hint(&raw, "playwright", result.exit_code);
@@ -467,5 +497,56 @@ mod tests {
         let result = PlaywrightParser::parse(invalid);
         assert_eq!(result.tier(), 3); // Passthrough
         assert!(!result.is_ok());
+    }
+
+    // The version line is not a test report. The call site skips the parser;
+    // the parser itself still has no exception for it.
+    #[test]
+    fn test_playwright_parser_version_line_stays_passthrough() {
+        let result = PlaywrightParser::parse("Version 1.64.1");
+        assert_eq!(result.tier(), 3);
+        assert!(!result.is_ok());
+    }
+
+    #[test]
+    fn test_is_playwright_test() {
+        let not_test = [
+            &["--version"][..],
+            &["-V"],
+            &["install"],
+            &["codegen"],
+            &["show-trace"],
+            &["show-report"],
+            &[],
+        ];
+        for argv in not_test {
+            let args: Vec<String> = argv.iter().map(|s| (*s).to_string()).collect();
+            assert!(!is_playwright_test(&args), "{argv:?}");
+        }
+
+        assert!(is_playwright_test(&["test".to_string()]));
+        assert!(is_playwright_test(&[
+            "test".to_string(),
+            "tests/login.spec.ts".to_string(),
+        ]));
+    }
+
+    #[test]
+    fn test_join_nontest_output() {
+        let stdout = "Version 1.64.1\n";
+        let version = join_nontest_output(stdout, "");
+        assert_eq!(version, stdout);
+        assert!(!version.contains("[RTK:PASSTHROUGH]"));
+        assert!(!version.contains("All parsing tiers failed"));
+
+        let stderr = r#"npm error npx canceled due to missing packages and no YES option: ["playwright@1.64.1"]"#;
+        let delegated = join_nontest_output("", stderr);
+        assert_eq!(delegated, stderr);
+        assert!(!delegated.contains("[RTK:PASSTHROUGH]"));
+        assert!(!delegated.contains("All parsing tiers failed"));
+
+        // One newline between the streams, and none added when stdout already ends in one.
+        assert_eq!(join_nontest_output("out", "err"), "out\nerr");
+        assert_eq!(join_nontest_output("out\n", "err"), "out\nerr");
     }
 }
