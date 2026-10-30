@@ -11,6 +11,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod common;
+
 const MARKER: &str = "and-reached";
 
 struct Sandbox {
@@ -39,6 +41,16 @@ fn write_file(root: &Path, rel: &str, bytes: &[u8]) {
         std::fs::create_dir_all(parent).expect("parent dir");
     }
     std::fs::write(path, bytes).expect("write fixture");
+}
+
+/// The rtk binary's path, for the helpers that also run the platform `find` and
+/// the one that launches through `sh`. [`isolate`] redirects each child's data.
+fn rtk_bin() -> String {
+    common::rtk_command()
+        .get_program()
+        .to_str()
+        .expect("rtk binary path is UTF-8")
+        .to_owned()
 }
 
 /// Pins home, config, and tracking so a developer machine cannot leak into the run.
@@ -113,7 +125,7 @@ fn assert_same_as_find(build: fn(&Path), args: &[&str]) {
     let rtk_sb = sandbox(build);
     let find_out = run(&find_sb, "find", args);
     let rtk_argv = rtk_args(args);
-    let rtk_out = run(&rtk_sb, env!("CARGO_BIN_EXE_rtk"), &rtk_argv);
+    let rtk_out = run(&rtk_sb, &rtk_bin(), &rtk_argv);
     assert_eq!(
         code(&rtk_out),
         code(&find_out),
@@ -155,7 +167,7 @@ fn assert_and(build: fn(&Path), args: &[&str], reached: bool) {
     let find_sb = sandbox(build);
     let rtk_sb = sandbox(build);
     let find_code = shell_and(&find_sb, "find", args);
-    let rtk_code = shell_and(&rtk_sb, env!("CARGO_BIN_EXE_rtk"), &rtk_args(args));
+    let rtk_code = shell_and(&rtk_sb, &rtk_bin(), &rtk_args(args));
     assert_eq!(rtk_code, find_code, "&& exit for {args:?}");
     assert_eq!(
         find_sb.root.join(MARKER).exists(),
@@ -217,11 +229,7 @@ fn bare_file_delete_removes_only_that_root() {
     assert_same_as_find(same_name_files, &["stale.log", "-delete"]);
     assert_and(same_name_files, &["stale.log", "-delete"], true);
     let sb = sandbox(same_name_files);
-    let _ = run(
-        &sb,
-        env!("CARGO_BIN_EXE_rtk"),
-        &rtk_args(&["stale.log", "-delete"]),
-    );
+    let _ = run(&sb, &rtk_bin(), &rtk_args(&["stale.log", "-delete"]));
     assert!(!sb.root.join("stale.log").exists());
     assert!(sb.root.join("nested/stale.log").exists());
     assert!(sb.root.join("keep.txt").exists());
@@ -231,11 +239,7 @@ fn bare_file_delete_removes_only_that_root() {
 fn multiple_file_roots_delete_only_those_files() {
     assert_same_as_find(two_roots, &["x.tmp", "y.tmp", "-delete"]);
     let sb = sandbox(two_roots);
-    let out = run(
-        &sb,
-        env!("CARGO_BIN_EXE_rtk"),
-        &rtk_args(&["x.tmp", "y.tmp", "-delete"]),
-    );
+    let out = run(&sb, &rtk_bin(), &rtk_args(&["x.tmp", "y.tmp", "-delete"]));
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
     assert!(!sb.root.join("x.tmp").exists());
     assert!(!sb.root.join("y.tmp").exists());
@@ -249,7 +253,7 @@ fn exec_echo_visits_only_the_named_root() {
     let sb = sandbox(same_name_files);
     let out = run(
         &sb,
-        env!("CARGO_BIN_EXE_rtk"),
+        &rtk_bin(),
         &rtk_args(&["stale.log", "-exec", "echo", "{}", ";"]),
     );
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
@@ -270,7 +274,7 @@ fn missing_bare_root_fails_and_mentions_the_path() {
         let find_sb = sandbox(missing_with_decoy);
         let rtk_sb = sandbox(missing_with_decoy);
         let find_out = run(&find_sb, "find", args);
-        let rtk_out = run(&rtk_sb, env!("CARGO_BIN_EXE_rtk"), &rtk_args(args));
+        let rtk_out = run(&rtk_sb, &rtk_bin(), &rtk_args(args));
         assert_ne!(code(&find_out), 0, "find control succeeded for {args:?}");
         assert_eq!(
             code(&rtk_out),
@@ -304,11 +308,7 @@ fn missing_root_does_not_reach_shell_and() {
     assert_and(missing_with_decoy, &["nodir"], false);
     assert_and(missing_with_decoy, &["nodir", "-delete"], false);
     let sb = sandbox(missing_with_decoy);
-    let _ = shell_and(
-        &sb,
-        env!("CARGO_BIN_EXE_rtk"),
-        &rtk_args(&["nodir", "-delete"]),
-    );
+    let _ = shell_and(&sb, &rtk_bin(), &rtk_args(&["nodir", "-delete"]));
     assert!(!sb.root.join(MARKER).exists());
     assert!(sb.root.join("nested/nodir").exists());
 }
@@ -320,15 +320,11 @@ fn quoted_root_with_spaces_is_a_single_path() {
     let sb = sandbox(spaced_names);
     let out = run(
         &sb,
-        env!("CARGO_BIN_EXE_rtk"),
+        &rtk_bin(),
         &rtk_args(&["my file.log", "-exec", "echo", "{}", ";"]),
     );
     assert_eq!(text(&out.stdout), "my file.log\n");
-    let _ = run(
-        &sb,
-        env!("CARGO_BIN_EXE_rtk"),
-        &rtk_args(&["my file.log", "-delete"]),
-    );
+    let _ = run(&sb, &rtk_bin(), &rtk_args(&["my file.log", "-delete"]));
     assert!(!sb.root.join("my file.log").exists());
     assert!(sb.root.join("nested/my file.log").exists());
 }
@@ -337,11 +333,7 @@ fn quoted_root_with_spaces_is_a_single_path() {
 fn dot_slash_keeps_glob_characters_in_the_file_name() {
     assert_same_as_find(glob_chars_in_name, &["./file*.log", "-delete"]);
     let sb = sandbox(glob_chars_in_name);
-    let out = run(
-        &sb,
-        env!("CARGO_BIN_EXE_rtk"),
-        &rtk_args(&["./file*.log", "-delete"]),
-    );
+    let out = run(&sb, &rtk_bin(), &rtk_args(&["./file*.log", "-delete"]));
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
     assert!(!sb.root.join("file*.log").exists());
     assert!(sb.root.join("fileX.log").exists());
@@ -358,7 +350,7 @@ fn explicit_directory_action_stays_under_that_root() {
     let sb = sandbox(explicit_directory);
     let out = run(
         &sb,
-        env!("CARGO_BIN_EXE_rtk"),
+        &rtk_bin(),
         &rtk_args(&["sub", "-name", "stale.log", "-delete"]),
     );
     assert_eq!(code(&out), 0, "{}", text(&out.stderr));
