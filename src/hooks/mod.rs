@@ -13,7 +13,14 @@ pub mod hook_cmd;
 pub mod init;
 pub mod integrity;
 pub mod permissions;
+pub mod permissions_opencode;
+#[deny(clippy::print_stdout, clippy::print_stderr)]
+#[cfg(feature = "engine")]
+pub mod posthook;
 pub mod rewrite_cmd;
+#[deny(clippy::print_stdout, clippy::print_stderr)]
+#[cfg(feature = "engine")]
+pub mod session_start;
 pub mod trust;
 pub mod verify_cmd;
 
@@ -35,8 +42,17 @@ pub fn is_claude_hook_command(command: &str) -> bool {
     is_rtk_hook_command(command, "claude")
 }
 
-pub fn is_codex_hook_command(command: &str) -> bool {
-    is_rtk_hook_command(command, "codex")
+#[cfg(feature = "engine")]
+static HOOK_AGENT: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+#[cfg(feature = "engine")]
+pub(crate) fn set_hook_agent(agent: &str) {
+    let _ = HOOK_AGENT.set(Some(agent.to_string()));
+}
+
+#[cfg(feature = "engine")]
+pub(crate) fn hook_agent() -> Option<String> {
+    HOOK_AGENT.get().cloned().flatten()
 }
 
 #[cfg(test)]
@@ -60,21 +76,5 @@ mod tests {
         assert!(!is_claude_hook_command("not-rtk hook claude"));
         assert!(!is_claude_hook_command("/opt/homebrew/bin/rtk hook cursor"));
         assert!(!is_claude_hook_command("echo rtk hook claude"));
-    }
-
-    #[test]
-    fn codex_hook_command_matches_bare_absolute_and_windows_rtk() {
-        assert!(is_codex_hook_command("rtk hook codex"));
-        assert!(is_codex_hook_command("/opt/homebrew/bin/rtk hook codex"));
-        assert!(is_codex_hook_command(
-            "\"C:\\Program Files\\rtk.exe\" hook codex"
-        ));
-    }
-
-    #[test]
-    fn codex_hook_command_rejects_other_commands() {
-        assert!(!is_codex_hook_command("rtk hook claude"));
-        assert!(!is_codex_hook_command("echo rtk hook codex"));
-        assert!(!is_codex_hook_command("\"rtk\"evil hook codex"));
     }
 }

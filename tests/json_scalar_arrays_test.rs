@@ -5,9 +5,9 @@
 
 use std::fs;
 use std::io::Write;
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 
-const RTK: &str = env!("CARGO_BIN_EXE_rtk");
+mod common;
 
 /// Follow-up pretty-printed reproduction: compact path (pretty input is larger
 /// than the compact form, so `never_worse` keeps the filtered output).
@@ -37,7 +37,7 @@ fn rtk_json_file(content: &str) -> Output {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("roles.json");
     fs::write(&path, content).expect("write json");
-    Command::new(RTK)
+    common::rtk_command()
         .arg("json")
         .arg(&path)
         .output()
@@ -45,7 +45,7 @@ fn rtk_json_file(content: &str) -> Output {
 }
 
 fn rtk_json_stdin(content: &str) -> Output {
-    let mut child = Command::new(RTK)
+    let mut child = common::rtk_command()
         .args(["json", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -186,7 +186,7 @@ fn json_rejects_non_json_extension() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
     fs::write(&path, "roles = [\"admin\"]").expect("write toml");
-    let out = Command::new(RTK)
+    let out = common::rtk_command()
         .arg("json")
         .arg(&path)
         .output()
